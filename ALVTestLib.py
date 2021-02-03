@@ -58,16 +58,16 @@ ImpaxRead() is a class that creates an object based on a directory that points t
             Output: Numpy Array
             calculates the horizontal data
 DiademRead(self,direct) is a class that creates an object with an directory input that points
-            a Diadem file
-TankRead(self,direct) is a class that creates an object with a directory input that points
-           a tank data file
+track_image(directory) convert a tri file into a dictionary for data manipulation through python
+track_to_excel(dictionary, title, save_directory) takes in the dictionary from track_image method, and outputs a user friendly excel file with the data from each tool used in track image.
 """
 import os
 from scipy.signal import filtfilt
 import struct
 import numpy as np
 import pandas as pd
-
+import xml.etree.ElementTree as ET
+import xlsxwriter
 
 class ImpaxRead:
 
@@ -276,6 +276,7 @@ class DiademRead:
                 self.data[key] = pd.Series(calc_data)
                 fup.close()
 
+
 def filter_processing(data, cfc, sample_rate):
     # calculate sample rate
     # Filter RAW data using J211 SAE Filtering
@@ -292,30 +293,310 @@ def filter_processing(data, cfc, sample_rate):
     b2 = (-1.0+np.sqrt(2.0)*wa-(wa**2.0))/(1.0+np.sqrt(2.0)*wa+(wa**2.0))
     b = [a0, a1, a2]
     a = [b0, -1*b1, -1*b2]
-#    CFC = 5/3*CFC
-#    wn = CFC/sample_rate * 2
-#    b,a = butter(2,wn,'low')
+    #CFC = 5/3*CFC
+    #wn = CFC/sample_rate * 2
+    #b,a = butter(2,wn,'low')
     y = filtfilt(b, a, data)
     return y
 
-# def linear_analysis(impactor_distance, dist_data, accel_data, time):
-#     bottomOut = False
-#     max_displacement = max(dist_data)
-#     if impactor_distance < max_displacement:
-#         bottomOut = True
-#     if bottomOut:
-#
-#     max_accel = min(accel_data)
+
+def linear_calc(data):
+    linear_dict = {}
+    
+    return linear_dict
 
 
-def filter_analysis(data, sample_rate, cfc_list = None ):
+def filter_analysis(data, sample_rate, cfc_list=None):
     filter_analysis_dict = {}
     if cfc_list is None:
-        cfc_list = [0,60,180,1000,5000]
+        cfc_list = [0, 60, 180, 1000, 5000]
     for i in cfc_list:
         if i == 0:
             filter_analysis_dict['RAW'] = filter_processing(data, i, sample_rate)
         else:
             filter_analysis_dict[str(i)] = filter_processing(data, i, sample_rate)
     return filter_analysis_dict
+
+
+def nij_calc(dummy_type, m_y, f_x, f_z):
+
+    """Purpose of this method is to calculate the Neck Injury Criterion per FMVSS208
+       The inputs for this are the dummy type. Right now 6 Year Old and 3 Year Old are the only dummys available
+       3 Year Old = 0
+       6 Year Old = 1
+       5th In position = 2
+       50th In position = 3
+       Moment Y Channel
+       Force in X direction
+       Force in Z Direction
+       Then using the methods defined by FMVSS208 the Nij is calculated"""
+    # Setting up critical forces dictionary. Depending if the force is negative or positive depends on what the
+    fcz = {0: {'Tension': 2120, 'Compression': -2120}, 1: {'Tension': 2800, 'Compression': -2800},
+           2: {'Tension': 4287, 'Compression': -3880}, 3: {'Tension': 6806, 'Compression': -6160}}
+    mcy = {0: {'Flexion': 68, 'Extension': -27}, 1: {'Flexion': 93, 'Extension': -37},
+           2: {'Flexion': 155, 'Extension': -67}, 3: {'Flexion': 310, 'Extension': -135}}
+    d = {0: 0, 1: 0.01778, 2: 0.01778, 3: 0.01778}
+    # Data needs to be filtered at CFC 600
+    # m_y_filter = filter_processing(M_y, 600, sample_rate)
+    # f_z_filter = filter_processing(F_z, 600, sample_rate)
+    # f_x_filter = filter_processing(F_x, 600, sample_rate)
+    Nij = []
+    for i in range(0, len(m_y)):
+        moc_y = m_y[i] - (d[dummy_type] * f_x[i])
+        if f_z[i] < 0:
+            a = f_z[i] / fcz[dummy_type]['Compression']
+        else:
+            a = f_z[i] / fcz[dummy_type]['Tension']
+        if m_y[i] < 0:
+            b = moc_y/mcy[dummy_type]['Extension']
+        else:
+            b = moc_y/mcy[dummy_type]['Flexion']
+        Nij.append(a+b)
+    return Nij
+
+
+def hic_calc(a_x, a_y, a_z, time, delta_hic):
+    # Purpose of this method is to calculate HIC (Head Injury Criterion). This is done using integration over specific
+    # curves. Defined by delta_hic (unlimited, 15ms, or 30ms)
+    # time is used to calculate the sample rate
+    # Calculate sample rate
+    sample = 1/(time[1]-time[0])
+    sample = int(sample)
+    # filter acceleration
+    a_x_filter = filter_processing(a_x, 1000, sample)
+    a_y_filter = filter_processing(a_y, 1000, sample)
+    a_z_filter = filter_processing(a_z, 1000, sample)
+    # Convert acceleration to m/s^2
+    # a_x_filter = a_x_filter * 9.81
+    # a_y_filter = a_y_filter * 9.81
+    # a_z_filter = a_z_filter * 9.81
+    # Calculate resultant of acceleration
+    a_r = np.sqrt((np.power(a_x_filter, 2) + np.power(a_y_filter, 2) + np.power(a_z_filter, 2)))
+    # Null data
+    null_idx = np.where(time >= 0)
+    null_idx = null_idx[0][0]
+    idx2 = np.where(time >= 0.2)[0][0]
+    a_r_null = a_r[null_idx:idx2]
+    time_null = time[null_idx:idx2]
+    # Calculate the number of data points in delta_hic convert delta_hic to seconds.
+    delta_hic = delta_hic/1000
+    time_len = int(delta_hic/(time[1]-time[0]))
+    hic_list = []
+    for i in time[:-time_len]:
+        t1 = np.where(time == i)[0][0]
+        t2 = t1 + time_len
+        time_array = time_null[t1:t2]
+        accel_array = a_r_null[t1:t2]
+        a = time[t2] - time[t1]
+        b = 1 / a
+        hic_a = (np.power((b * np.trapz(accel_array, time_array)), 2.5)*a)
+        hic_list.append(hic_a)
+        del time_array
+        del accel_array
+    hic = max(hic_list)
+    return hic, a_r
+
+
+def linear_calc(data):
+    linear_dict = {}
+
+    return linear_dict
+
+
+def track_image(directory):
+    # Method is for taking track image TRI files and outputting the Trajectory2D and Airbag2D into a dictionary for
+    # easier data manipulation with Python.
+    xml_data = open(directory, 'r').read()
+    root = ET.XML(xml_data)
+    frames = {}
+    frames_2d = {}
+    track_data_x = {}
+    track_data_y = {}
+    ab2_d_x = {}
+    ab2_d_y = {}
+    parameters = {}
+    
+    for child in root.iter('Object'):
+        # Find info for current file Frames per Second, Frames, time step, offset time
+        if child.get('type') == 'Sequence':
+            time_off = child.find('./Content/TimeOffset')
+            frame_rate = child.find('./Content/FrameRate')
+            frame_count = child.find('./Content/FramesCount')
+            time_step = child.find('./Content/FrameDuration')
+        # Find Trajectory2D data inside xml file
+        if child.get('type') == 'Trajectory2D':
+            track_data_x[child.get('name')] = []
+            track_data_y[child.get('name')] = []
+            frames[child.get('name')] = []
+            for subchild in child.iter('Content'):
+                for data in subchild.iter('xworlds'):
+                    track_data_x[child.get('name')] = [float(i) for i in data.text.split(' ')]
+                for data in subchild.iter('yworlds'):
+                    track_data_y[child.get('name')] = [float(i) for i in data.text.split(' ')]
+                for data in subchild.iter('images'):
+                    frames[child.get('name')] = [int(i) for i in data.text.split(' ')]
+        # Find Airbag2D data
+        if child.get('type') == 'Airbag2D':
+            parameters[child.get('name')] = {}
+            str_data_x = []
+            str_data_y = []
+            l_edge = {}
+            r_edge = {}
+            u_edge = {}
+            d_edge = {}
+            cg = {}
+            ab2_d_x[child.get('name')] = []
+            ab2_d_y[child.get('name')] = []
+            frames_2d[child.get('name')] = []
+            l_edge['X'] = [float(i) for i in child.find('.//Parameters//LeftEdges//xworlds').text.split(' ')]
+            r_edge['X'] = [float(i) for i in child.find('.//Parameters//RightEdges//xworlds').text.split(' ')]
+            u_edge['X'] = [float(i) for i in child.find('.//Parameters//UpperEdges//xworlds').text.split(' ')]
+            d_edge['X'] = [float(i) for i in child.find('.//Parameters//LowerEdges//xworlds').text.split(' ')]
+            l_edge['Y'] = [float(i) for i in child.find('.//Parameters//LeftEdges//yworlds').text.split(' ')]
+            r_edge['Y'] = [float(i) for i in child.find('.//Parameters//RightEdges//yworlds').text.split(' ')]
+            u_edge['Y'] = [float(i) for i in child.find('.//Parameters//UpperEdges//yworlds').text.split(' ')]
+            d_edge['Y'] = [float(i) for i in child.find('.//Parameters//LowerEdges//yworlds').text.split(' ')]
+            cg['Y'] = [float(i) for i in child.find('.//Parameters//Centers//yworlds').text.split(' ')]
+            cg['X'] = [float(i) for i in child.find('.//Parameters//Centers//xworlds').text.split(' ')]
+            parameters[child.get('name')] = {'Left Edge': l_edge, 'Right Edge': r_edge, 'Upper Edge': u_edge, 'Lower Edge': d_edge, 'CG': cg}
+
+            for subchild in child.find('.//Curves'):
+                str_data_x.append(subchild.find('.//xworlds').text.split(' '))
+                str_data_y.append(subchild.find('.//yworlds').text.split(' '))
+                frames_2d[child.get('name')].append(int(subchild.get('frame')))
+            for i in range(0, len(str_data_x)):
+                ab2_d_x[child.get('name')].append([float(j) for j in str_data_x[i]])
+                ab2_d_y[child.get('name')].append([float(k) for k in str_data_y[i]])
+            
+            
+    # Calculate time array for file
+    offset = float(time_off.text)/1000
+    delta = float(time_step.text)/1000
+    end_time = int(frame_count.text)/int(float(frame_rate.text))*1000
+    time = np.arange(offset, end_time, delta)
+    track_dict = {"Trajectory X": track_data_x, "Trajectory Y": track_data_y, "Trajectory Frame": frames,
+                  "AB2D X": ab2_d_x, "AB2D Y": ab2_d_y, "AB2D Frame": frames_2d,
+                  "Frame rate": int(float(frame_rate.text)), 'Time Offset': float(time_off.text)/1000,
+                  "Number of Frames": int(frame_count.text), "Time_Step": float(time_step.text)/1000,
+                  "Time (msec)": time, "Parameters": parameters }
+    return track_dict
+
+
+def track_to_excel(dictionary, title, save_direct):
+    save_direct = save_direct + '\\'+title + '.xlsx'
+    workbook = xlsxwriter.Workbook(save_direct)
+    cell_format = workbook.add_format({'bold': 1, 'align': 'center', 'valign': 'vcenter','border': 1})
+    merge_format = workbook.add_format({'bold': 1, 'align': 'center', 'valign': 'vcenter','border': 1,
+                                        'rotation': 90})
+    for key in dictionary.keys():
+        if 'Trajectory X' in key and dictionary[key]:
+            frame_start = []
+            frame_end = []
+            for frame_key in dictionary['Trajectory Frame'].keys():
+                frame_start.append(dictionary['Trajectory Frame'][frame_key][0])
+                frame_end.append(dictionary['Trajectory Frame'][frame_key][-1])
+            frame_list = list(range(1, dictionary['Number of Frames'] + 1))
+            start_idx = frame_list.index(min(frame_start))
+            end_idx = frame_list.index(max(frame_end))
+            traj_work = workbook.add_worksheet('2D Trajectory')
+            traj_work.merge_range('A1:A2', 'Frames', cell_format)
+            traj_work.merge_range('B1:B2', 'Time', cell_format)
+            row = 2
+            col = 0
+            for i in frame_list[start_idx:end_idx+1]:
+                time_idx = frame_list.index(i)
+                traj_work.write(row, col, i)
+                traj_work.write(row, col+1, dictionary['Time (msec)'][time_idx])
+                row += 1
+            row = 0
+            col = 2
+            for sub_key in dictionary[key].keys():
+                traj_work.merge_range(row, col, row, col + 1, sub_key, cell_format)
+                traj_work.write(1, col, 'X', cell_format)
+                traj_work.write(1, col+1, 'Y', cell_format)
+                count = 0
+                for i in dictionary[key][sub_key]:
+                    data_row = dictionary['Trajectory Frame'][sub_key][count] - start_idx + 1
+                    traj_work.write(data_row, col, i)
+                    traj_work.write(data_row, col+1, dictionary['Trajectory Y'][sub_key][count])
+                    count += 1
+                col += 2
+
+        if 'AB2D X' in key and dictionary[key]:
+            row = 0
+            col = 0
+            frame_list = list(range(1,dictionary['Number of Frames']+1))
+            data_points_length = {}
+            ab2D_work = workbook.add_worksheet('Airbag 2D')
+            row_position = 0
+            for sub_key in dictionary[key].keys():
+                #find max length of list data to merge rows
+                row = row_position
+                col = 0
+                ab2D_work.write(row,col,'Frame',cell_format)
+                row += 1
+                ab2D_work.write(row,col,'Time',cell_format)
+                row += 1
+                array_length = [len(i) for i in dictionary[key][sub_key]]
+                merge_row = max(array_length)
+                ab2D_work.merge_range(row,0,row + merge_row,0, sub_key, merge_format)
+                col += 1
+                count = 0
+                list_count = 0
+                for i in dictionary[key][sub_key]: 
+                    row = row_position  
+                    ab2D_work.merge_range(row,col,row, col + 1,dictionary['AB2D Frame'][sub_key][count],cell_format)
+                    row += 1
+                    time = dictionary['Time (msec)'][dictionary['AB2D Frame'][sub_key][count]]
+                    ab2D_work.merge_range(row,col,row,col+1, time ,cell_format)
+                    row += 1
+                    ab2D_work.write(row,col,'X',cell_format)
+                    ab2D_work.write(row,col+1,'Y',cell_format)
+                    row += 1
+                    matrix_count = 0
+                    for j in i:
+                        ab2D_work.write(row,col,j)
+                        ab2D_work.write(row,col+1,dictionary['AB2D Y'][sub_key][list_count][matrix_count])
+                        matrix_count += 1
+                        row += 1
+                    row = row
+                    matrix_count = 0
+                    list_count += 1
+                    col += 2
+                    count += 1
+                row_position = row_position + merge_row + 4
+        if 'Parameters' in key:
+            param = workbook.add_worksheet('Parameters')
+            col = 0
+            for sub_key in dictionary[key].keys():
+                row = 0
+                param.merge_range(row,col,row,col+11,sub_key,cell_format)
+                row += 1
+                param.merge_range(row, col, row + 1, col, 'Frame', cell_format)
+                param.merge_range(row, col+1, row + 1, col + 1, 'Time (msec)', cell_format)
+                row += 2
+                for i in dictionary['AB2D Frame'][sub_key]:
+                    param.write(row,col,i)
+                    param.write(row,col+1, dictionary['Time (msec)'][i - 1])
+                    row += 1
+                col += 2
+                row = 1
+                for type_key in dictionary[key][sub_key].keys():
+                    param.merge_range(row, col, row, col + 1, type_key, cell_format)
+                    row += 1
+                    param.write(row,col,'X',cell_format)
+                    param.write(row,col+1,'Y',cell_format)
+                    row += 1
+                    count = 0
+                    for i in dictionary[key][sub_key][type_key]['X']:
+                        param.write(row,col,i)
+                        param.write(row,col+1,dictionary[key][sub_key][type_key]['Y'][count])
+                        row += 1
+                        count += 1
+                    col += 2
+                    row = 1
+
+    workbook.close()
+
+
 
