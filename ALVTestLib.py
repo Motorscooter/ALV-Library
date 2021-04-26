@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+
 """
 Created on Mon Dec  3 19:52:50 2018
 
@@ -63,6 +63,7 @@ track_to_excel(dictionary, title, save_directory) takes in the dictionary from t
 """
 import os
 from scipy.signal import filtfilt
+from scipy import integrate
 import struct
 import numpy as np
 import pandas as pd
@@ -599,4 +600,131 @@ def track_to_excel(dictionary, title, save_direct):
     workbook.close()
 
 
+def sample_rate(time):
 
+    """Sample Rate Calculator
+
+    Args:
+        time (Pandas Series): Need to input a series of the time values from the calculated data. data should be converted to msec if its not in those units. 
+
+    Returns:
+        [float]: [calculated sample rate by 1/(max time value - min time value) then  multiplying it by the number of samples]
+    """
+    sam_rate = 1/(time.max()/1000 - time.min()/1000) * (len(time)-1)
+    return sam_rate
+
+
+def contact_time(accel_list, time_list, negative_accel = True):
+    """Calculate contact time
+
+    Args:
+        accel_list (list of acceleration data): [list or pd series of acceleration]
+        time_list (float units (msec)): [time list/pd.series to find contact time]
+        negative_accel (bool, optional): [If acceleration is sloping positive this value should be false]. Defaults to True.
+
+    Returns:
+        [float, integer]: [returns the time at which the impactor makes contact with the PAB based off of ATS201]
+    """
+    samp_rate = sample_rate(time_list)
+    #calculate number of samples per msec. For finding rate of change greater than 1ms
+    sample = sample_rate/1000
+    sample = int(sample_rate + (sample_rate/2))
+    count = 0
+    for i in accel_list:
+        if negative_accel == True and i <= -1:
+            accel_rate = (accel_list[count + sample] - i)/(time_list[count + sample]/1000 - time_list[count]/1000)
+            if accel_rate >= 100.00
+                contact_time = time[count]
+                time_index = count
+                break
+        else if negative_accel == False and i >= 1:
+            accel_rate = (accel_list[count + sample] - i)/(time_list[count + sample]/1000 - time_list[count]/1000)
+            if accel_rate >= 100.00
+                contact_time = time[count]
+                time_index = count
+                break            
+    return contact_time, time_index
+
+
+def calc_force(accel, impactor_mass):
+    """Calculate force
+
+    Args:
+        accel (list or series): Acceleration array read from diadem or impax file
+        impactor_mass (float): Mass of the impactor. This is needed to calculate the force. 
+
+    Returns:
+        : Pandas series with calculated force in (N). 
+    """
+    force = []
+    for i in accel:
+        force.append(i * 9.81 * impactor_mass)
+    force_df = pd.Series(force)
+    return force_df
+
+
+def velocity(accel, time):
+    """calculate the velocity of the test using acceleration and time and integrating the curve. Make sure the the acceleration is in m/s^2 and the time is in msec.
+
+    Args:
+        accel (array): [acceleration array in m/s^2]
+        time (array): [time array in msec]
+    """
+    vel = integrate.cumtrapz(accel, time/1000)
+    return vel
+
+
+def kinetic_energy(velocity, impactor_mass):
+    """Calculate kinetic energy of the impactor
+
+    Args:
+        velocity ([Array]): [velocity, either calculated with post processed files, or calculated using velocity method in this library]
+        impactor_mass ([float]): [mass of the impactor in kg]
+    """
+    ke = []
+    for i in velocity:
+        ke.append(0.5 * impactor_mass * i**2)
+    return ke
+
+
+def null_data(time, data, null_at = 0.0)
+    """Null data at a given time point (default is 0msec)
+
+    Returns:
+        data structures: [Pandas data frame that outputs the nulled data]
+    """
+    idx = time[time == null_at].index[0]
+    trun_time = time.truncate(before = idx)
+    null_data = data.truncate(before = idx)
+    columns = list(null_data)
+    for i in columns:
+        null_data[i] = null_data[i] - null_data[i][idx]
+    null_data.insert(0,'Time(msec)', trun_time)
+    return null_data
+
+
+def ride_down(acceleration, time, negative_curve = True):
+    """Calculates the ride down value for the acceleration curve. The ride down is the slope of the acceleration from contact to max acceleration
+
+    Args:
+        acceleration (array): [acceleration array units are not taken into account for this. ]
+        time ([array]): [time units are not taken into account]
+        negative_curve (BOOLEAN) = [if value is True (default) the acceleration curve is negative so the max value will actually the min value.]
+
+    Returns:
+        [Ride down]: [Takes max acceleration, and accleration at contact time and outputs the slope of that curve. ]
+    """
+    if negative_curve == True:
+        con_time, con_idx = contact_time(acceleration, time)
+        peak_accel = acceleration.min()
+        peak_time = acceleration[acceleration == peak_accel].index[0]
+        contact_accel = acceleration[con_idx]
+        ride_dwn_value = (peak_accel - contact_accel)/(peak_time - con_time)
+    else if negative_curve == False:
+        con_time, con_idx = contact_time(acceleration, time)
+        peak_accel = acceleration.max()
+        peak_time = acceleration[acceleration == peak_accel].index[0]
+        contact_accel = acceleration[con_idx]
+        ride_dwn_value = (peak_accel - contact_accel)/(peak_time - con_time)
+    
+    return ride_dwn_value
