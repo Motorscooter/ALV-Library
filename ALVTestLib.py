@@ -218,7 +218,7 @@ class DiademRead:
     265, Property Width """
 
 
-    def __init__(self, direct):
+    def __init__(self, direct,channel_list = []):
         filename, file_ext = os.path.splitext(direct)
         location, file = os.path.split(direct)
         self.file = file
@@ -234,8 +234,12 @@ class DiademRead:
                 if channel_header:
                     linetxt = line.split(',')
                     if linetxt[0] == '200':
-                        self.channel[linetxt[1].rstrip()] = {}
                         channelname = linetxt[1].rstrip()
+                        if channel_list:
+                            if channelname not in channel_list:
+                                continue
+                            elif channelname in channel_list:
+                                self.channel[channelname] = {}
                     elif linetxt[0] == '201':
                         self.channel[channelname]['Description'] = linetxt[1].rstrip()
                     elif linetxt[0] == '202':
@@ -361,8 +365,7 @@ def hic_calc(a_x, a_y, a_z, time, delta_hic):
     # curves. Defined by delta_hic (unlimited, 15ms, or 30ms)
     # time is used to calculate the sample rate
     # Calculate sample rate
-    sample = 1/(time[1]-time[0])
-    sample = int(sample)
+    sample = int(sample_rate(time))
     # filter acceleration
     a_x_filter = filter_processing(a_x, 1000, sample)
     a_y_filter = filter_processing(a_y, 1000, sample)
@@ -390,7 +393,7 @@ def hic_calc(a_x, a_y, a_z, time, delta_hic):
         accel_array = a_r_null[t1:t2]
         a = time[t2] - time[t1]
         b = 1 / a
-        hic_a = (np.power((b * np.trapz(accel_array, time_array)), 2.5)*a)
+        hic_a = (np.power((b * np.cumtrapz(accel_array, time_array)), 2.5)*a)
         hic_list.append(hic_a)
         del time_array
         del accel_array
@@ -633,13 +636,13 @@ def contact_time(accel_list, time_list, negative_accel = True):
     for i in accel_list:
         if negative_accel == True and i <= -1:
             accel_rate = (accel_list[count + sample] - i)/(time_list[count + sample]/1000 - time_list[count]/1000)
-            if accel_rate >= 100.00
+            if accel_rate >= 100.00:
                 contact_time = time[count]
                 time_index = count
                 break
-        else if negative_accel == False and i >= 1:
+        elif negative_accel == False and i >= 1:
             accel_rate = (accel_list[count + sample] - i)/(time_list[count + sample]/1000 - time_list[count]/1000)
-            if accel_rate >= 100.00
+            if accel_rate >= 100.00:
                 contact_time = time[count]
                 time_index = count
                 break            
@@ -687,7 +690,7 @@ def kinetic_energy(velocity, impactor_mass):
     return ke
 
 
-def null_data(time, data, null_at = 0.0)
+def null_data(time, data, null_at = 0.0):
     """Null data at a given time point (default is 0msec)
 
     Returns:
@@ -695,11 +698,8 @@ def null_data(time, data, null_at = 0.0)
     """
     idx = time[time == null_at].index[0]
     trun_time = time.truncate(before = idx)
-    null_data = data.truncate(before = idx)
-    columns = list(null_data)
-    for i in columns:
-        null_data[i] = null_data[i] - null_data[i][idx]
-    null_data.insert(0,'Time(msec)', trun_time)
+    null_data = data - data[idx]
+    null_data = null_data.truncate(before = idx)
     return null_data
 
 
@@ -720,7 +720,7 @@ def ride_down(acceleration, time, negative_curve = True):
         peak_time = acceleration[acceleration == peak_accel].index[0]
         contact_accel = acceleration[con_idx]
         ride_dwn_value = (peak_accel - contact_accel)/(peak_time - con_time)
-    else if negative_curve == False:
+    elif negative_curve == False:
         con_time, con_idx = contact_time(acceleration, time)
         peak_accel = acceleration.max()
         peak_time = acceleration[acceleration == peak_accel].index[0]
@@ -728,3 +728,5 @@ def ride_down(acceleration, time, negative_curve = True):
         ride_dwn_value = (peak_accel - contact_accel)/(peak_time - con_time)
     
     return ride_dwn_value
+
+
