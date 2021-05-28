@@ -238,8 +238,8 @@ class DiademRead:
                         if channel_list:
                             if channelname not in channel_list:
                                 continue
-                            elif channelname in channel_list:
-                                self.channel[channelname] = {}
+                        self.channel[channelname] = {}
+                        
                     elif linetxt[0] == '201':
                         self.channel[channelname]['Description'] = linetxt[1].rstrip()
                     elif linetxt[0] == '202':
