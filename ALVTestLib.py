@@ -140,7 +140,7 @@ class ImpaxRead:
                     split_line = line.split("=")
                     self.header[split_line[0]] = self.parse_header_data(split_line[1].strip())
                     if 'BuildSheet' in line:
-                        read_flag = True
+                        read_flag = False
             fup.close()
             self.BS = str(self.header['BuildSheet'])
             self.sampleID = str(self.header['Sample'])
@@ -280,6 +280,61 @@ class DiademRead:
                 calc_data = float_array * self.channel[key]['Scale'] + self.channel[key]['OffSet']
                 self.data[key] = pd.Series(calc_data)
                 fup.close()
+
+class TrackImage:
+    """Track image class will create a class that internally has all the data from the TRI files.
+
+    Attributes:
+
+    Sequence Dictionary: Level 1 Key Filename
+                                Level 2 Frames
+                                        Frame Duration
+                                        Spaital Resolution
+                                        Frame Rate
+                                        Time Offset
+    Trajectory Dictionary: Level 1 Name/Title (Whatever the title was for the trajectorgraphy)
+                                Level 2 Pandas Dataframe Index is Frames columns (x_world, y_world, x_image, y_image)
+    Airbag 2D Dictionary: Level 1 Name/Title
+                                Level 2 Tracking
+                                    Level 3 (x (list), y (list)) Tuple
+
+                                Level 2 Parameters
+                                    Level 3 Parameter Name
+                                        Level 4 Pandas Data Frame (x world, y world, x image, y image)
+
+    Methods:
+        Velocity Tracking Inputs(Sequence, edge, tracking_direction)
+        Threshhold(sequence, edge, track_direction, threshhold)
+    """
+    def __init__(self, direct):
+        filename, file_ext = os.path.splitext(direct)
+        location, file = os.path.split(direct)
+        self.file = file
+        self.loca = location
+        file_ext = file_ext.strip('.')
+        xml_data = open(direct, 'r').read()
+        root = ET.XML(xml_data)
+        self.sequence = {}
+        self.trajectory = {}
+        self.AB2D = {}
+
+        for child in root.iter('Object'):
+            if child.get('type') == 'Sequence':
+                file_path = child.find('./Content/Filepath')
+                filename, file_ext = os.path.splitext(file_path)
+                self.sequence[filename] = {}
+                self.sequence[filename]['Frames'] = child.find('./Content/FramesCount')
+                self.sequence[filename]['Frame Duration'] = child.find('./Content/FrameDuration')
+                self.sequence[filename]['Spatial Resolution'] = child.find('./Content/SpatialResolution')
+                self.sequence[filename]['Frame Rate'] = int(child.find('./Content/FrameRate'))
+                self.sequence[filename]['Time Offset'] = child.find('./Content/TimeOffset')
+            elif child.get('type') == 'Trajectory2D':
+                title = child.get('name')
+                temp_dict = {}
+                
+                self.trajectory[title] = {}
+                
+
 
 
 def filter_processing(data, cfc, sample_rate):
@@ -621,7 +676,7 @@ def contact_time(accel_list, time_list, negative_accel = True):
     """Calculate contact time
 
     Args:
-        accel_list (list of acceleration data): [list or pd series of acceleration]
+        accel_list (list of acceleration data): [list or series of acceleration]
         time_list (float units (msec)): [time list/pd.series to find contact time]
         negative_accel (bool, optional): [If acceleration is sloping positive this value should be false]. Defaults to True.
 
@@ -637,13 +692,13 @@ def contact_time(accel_list, time_list, negative_accel = True):
         if negative_accel == True and i <= -1:
             accel_rate = (accel_list[count + sample] - i)/(time_list[count + sample]/1000 - time_list[count]/1000)
             if accel_rate >= 100.00:
-                contact_time = time[count]
+                contact_time = time_list[count]
                 time_index = count
                 break
         elif negative_accel == False and i >= 1:
             accel_rate = (accel_list[count + sample] - i)/(time_list[count + sample]/1000 - time_list[count]/1000)
             if accel_rate >= 100.00:
-                contact_time = time[count]
+                contact_time = time_list[count]
                 time_index = count
                 break            
     return contact_time, time_index
