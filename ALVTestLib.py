@@ -331,12 +331,7 @@ class TrackImage:
             elif child.get('type') == 'Trajectory2D':
                 title = child.get('name')
                 temp_dict = {}
-                
                 self.trajectory[title] = {}
-                
-
-
-
 def filter_processing(data, cfc, sample_rate):
     # calculate sample rate
     # Filter RAW data using J211 SAE Filtering
@@ -362,7 +357,6 @@ def filter_processing(data, cfc, sample_rate):
 
 def linear_calc(data):
     linear_dict = {}
-    
     return linear_dict
 
 
@@ -474,7 +468,6 @@ def track_image(directory):
     ab2_d_x = {}
     ab2_d_y = {}
     parameters = {}
-    
     for child in root.iter('Object'):
         # Find info for current file Frames per Second, Frames, time step, offset time
         if child.get('type') == 'Sequence':
@@ -526,8 +519,6 @@ def track_image(directory):
             for i in range(0, len(str_data_x)):
                 ab2_d_x[child.get('name')].append([float(j) for j in str_data_x[i]])
                 ab2_d_y[child.get('name')].append([float(k) for k in str_data_y[i]])
-            
-            
     # Calculate time array for file
     offset = float(time_off.text)/1000
     delta = float(time_step.text)/1000
@@ -708,11 +699,11 @@ def calc_force(accel, impactor_mass):
     """Calculate force
 
     Args:
-        accel (list or series): Acceleration array read from diadem or impax file
-        impactor_mass (float): Mass of the impactor. This is needed to calculate the force. 
+        accel (list or series): Acceleration array read from diadem or Impax file
+        impactor_mass (float): Mass of the impactor. This is needed to calculate the force
 
     Returns:
-        : Pandas series with calculated force in (N). 
+        : Pandas series with calculated force in (N)
     """
     force = []
     for i in accel:
